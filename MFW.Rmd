@@ -1,0 +1,239 @@
+---
+title: "MFW"
+author: "Dana Roemling"
+date: "2025-04-08"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly  
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Most Frequent Words
+
+The goal for this markdown is to find the most frequent words - or better to create a matrix that has all words and all texts so you can see which word occurs how often in which text. 
+
+### Preparation
+
+```{r libraries, message = FALSE, warning = FALSE}
+library(tidyverse)
+library(tidytext)
+library(tidyr)
+library(stringr)
+library(readr)
+library(ggplot2)
+library(scales)
+```
+
+I'll use the *awesome* data we've had a look at in class for this example.
+I create a list of all file names and then get the names for each author so I can make sure the matrices I create are per author. 
+
+```{r files}
+# Change this according to your system & needs
+path_to_known <- "/Users/dana/Documents/Teaching (recent)/HY/Week 5/JEF_DIC/"  
+path_to_disputed <- "/Users/dana/Documents/Teaching (recent)/HY/Week 5/DISPUTED"  
+
+# List all .txt files in the known folder
+all_files <- list.files(path_to_known, pattern = "\\.txt$", full.names = TRUE)
+
+# Filter files that contain "JEF_" or "DIC_"
+jef_files <- all_files[grepl("^JEF", basename(all_files))]
+dic_files <- all_files[grepl("^DIC", basename(all_files))]
+```
+
+### Preprocessing
+
+I decided to strip punctuation and to lowercase (which are analytical choices you may not agree with!), but I kept apostrophes in words like "isn't".  
+Note that I only read in the txt files after I create the preprocessing function so I can apply it. 
+
+```{r preprocessing}
+# Function to read and preprocess a file
+read_and_clean <- function(file) {
+  text <- read_file(file)
+  # Remove punctuation except apostrophes, convert to lowercase
+  text_clean <- tolower(text)
+  text_clean <- str_replace_all(text_clean, "[^\\w\\s']+", "")  # keep apostrophes
+  tibble(filename = basename(file), text = text_clean)
+}
+
+# Read all files per author
+dic_texts <- map_dfr(dic_files, read_and_clean)
+jef_texts <- map_dfr(jef_files, read_and_clean)
+```
+
+### Matrices
+
+This next bit does all the work, it tokenises and then counts all the words.
+Note that only words that occur at least once will show up in the matrices. 
+Note also that these are raw frequencies, nothing is normalised in this step.
+
+```{r matrices}
+# Tokenise into words and count per file
+tokenise_count <- function(df) {
+  df %>%
+    unnest_tokens(word, text, token = "words") %>%
+    count(filename, word) %>%
+    pivot_wider(names_from = word, values_from = n, values_fill = 0) %>%
+    arrange(filename)
+}
+
+# Create document-term matrices
+dic_matrix <- tokenise_count(dic_texts)
+jef_matrix <- tokenise_count(jef_texts)
+```
+
+### Normalisation
+
+You can normalise per text or per author depending on what you are analysing/comparing. 
+Usually:  
+Comparing documents/texts? → Normalise per file  
+Comparing authors’ styles? → Normalise per author  
+  
+For the sake of the matrix, we treat each file as a mini-corpus for which we normalise, so we can then see which words occur frequent across texts and are a sign of an author's style.  
+  
+Options to normalise per author (all words by that person) would be for example to look at the sum of each word of that author and normalise the overall count [code below if you need it]. But since I'm after a matrix in this case, let's normalise per file (to account for the text length).   
+In this case I also decided to scale per 1,000,000 words to make the numbers a bit easier to appreciate. Change the scale argument in the normalise_matrix function to use a different scale. This defaults to the pmw now.
+
+```{r normalising_the_matrix}
+# Function to normalise each row (i.e., per file)
+normalise_matrix <- function(df, scale = 1e6) {
+  filenames <- df$filename
+  word_counts <- df %>% select(-filename)
+  
+  # Total words per file
+  row_totals <- rowSums(word_counts)
+  
+  # Divide each cell in a row by the total words in that row
+  normalised <- sweep(word_counts, 1, row_totals, FUN = "/") * scale
+  
+  # Round the results to two decimal places
+  normalised <- round(normalised, 2)
+  
+  # Add filename column back
+  normalised_df <- bind_cols(tibble(filename = filenames), as_tibble(normalised))
+  
+  return(normalised_df)
+}
+
+# Apply to DIC and JEF matrices
+dic_matrix_norm <- normalise_matrix(dic_matrix, scale = 1e6)
+jef_matrix_norm <- normalise_matrix(jef_matrix, scale = 1e6)
+```
+
+This looks at the total number of occurrences per author and normalises those. You could add, like above, to do this pmw.
+
+```{r normalising_totals_per_author}
+# Remove filename column and convert to matrix
+normalise_matrix <- function(df) {
+  word_counts <- df %>% select(-filename)
+  total_words <- sum(word_counts)
+  word_totals <- colSums(word_counts)
+  word_frequencies <- word_totals / total_words
+  
+  # Format to avoid scientific notation
+  word_frequencies <- format(word_frequencies, scientific = FALSE)
+  
+  tibble(word = names(word_frequencies), freq = word_frequencies)
+}
+
+# Get normalised frequency per author
+dic_freq <- normalise_matrix(dic_matrix)
+jef_freq <- normalise_matrix(jef_matrix)
+
+# View top frequent words
+dic_freq %>% 
+  arrange(desc(freq)) %>% 
+  head(10)
+jef_freq %>% 
+  arrange(desc(freq)) %>% 
+  head(10)
+```
+
+### Plotting MFW
+
+Now we can also plot things again, which might help to understand what we've just done or to explain it to others. This bit will just look at the most frequent words per author.
+
+```{r plotting_frequencies}
+# Get word frequencies for DIC and JEF
+dic_word_frequencies <- dic_matrix_norm %>%
+  select(-filename) %>%
+  colSums()
+
+jef_word_frequencies <- jef_matrix_norm %>%
+  select(-filename) %>%
+  colSums()
+
+# Create data frames for plotting
+dic_word_df <- tibble(word = names(dic_word_frequencies), freq = dic_word_frequencies)
+jef_word_df <- tibble(word = names(jef_word_frequencies), freq = jef_word_frequencies)
+
+# Top N (e.g., top 20) words
+top_n <- 20
+dic_top_n_words <- dic_word_df %>%
+  arrange(desc(freq)) %>%
+  head(top_n)
+
+jef_top_n_words <- jef_word_df %>%
+  arrange(desc(freq)) %>%
+  head(top_n)
+
+# Plot DIC top N words
+ggplot(dic_top_n_words, aes(x = reorder(word, freq), y = freq)) +
+  geom_bar(stat = "identity", fill = "lightslateblue") +
+  coord_flip() +
+  scale_y_continuous(labels = label_number(scale = 1, suffix = "", accuracy = 0.01)) +  
+  labs(title = "Top 20 Most Frequent Words (DIC)", x = "Word", y = "Normalised Frequency")
+
+# Plot JEF top N words
+ggplot(jef_top_n_words, aes(x = reorder(word, freq), y = freq)) +
+  geom_bar(stat = "identity", fill = "lightslateblue") +
+  coord_flip() +
+  scale_y_continuous(labels = label_number(scale = 1, suffix = "", accuracy = 0.01)) + 
+  labs(title = "Top 20 Most Frequent Words (JEF)", x = "Word", y = "Normalised Frequency")
+```
+
+### Plotting single words of interest
+
+If we want to, like in the original paper, look at a specific word of interest and how it is used by the specific authors (in this case aggreagated across all texts that contain the word in question, not per genre like in the original), this is how to do it:
+
+```{r box_plotting_specific_words}
+# Filter the normalised data for the word of interest (exact match!)
+dic_single_word <- dic_matrix_norm %>% 
+  select(filename, matches("^upon$"))
+
+jef_single_word <- jef_matrix_norm %>% 
+  select(filename, matches("^upon$"))
+
+# Add a column for the author (to distinguish between DIC and JEF)
+dic_single_word$author <- "DIC"
+jef_single_word$author <- "JEF"
+
+# Combine the data
+single_word_data <- bind_rows(dic_single_word, jef_single_word)
+
+# Gather the data into a tidy format for plotting
+single_word_data_long <- single_word_data %>%
+  pivot_longer(cols = -c(filename, author), names_to = "word", values_to = "frequency")
+
+# Define custom colours for each author
+custom_colours <- c("DIC" = "turquoise",  
+                   "JEF" = "darkorchid")  
+
+# The actual plot
+ggplot(single_word_data_long, 
+       aes(x = author, 
+           y = frequency, 
+           fill = author)) +
+  geom_boxplot() +
+  labs(title = "Box Plot of 'Upon' Frequencies Across Files", 
+       x = "Author", 
+       y = "Frequency of 'Upon'",
+       fill = "Author") +
+  scale_fill_manual(values = custom_colours) +  
+  theme_minimal()
+```
+
