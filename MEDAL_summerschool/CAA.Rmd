@@ -1,0 +1,812 @@
+---
+title: "Bitcoin Authorship Analysis"
+subtitle: "Comparative Authorship Analysis Methods"
+author: "Dana Roemling (d.roemling@bham.ac.uk) and Jack Grieve (j.grieve@bham.ac.uk)"
+date: "2025/06/12"
+output:
+  html_document:
+    number_sections: yes
+    theme: paper
+    toc: yes
+    toc_depth: 4
+    toc_float: yes
+
+---
+  
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(tidy = TRUE)
+knitr::opts_knit$set(root.dir = getwd())
+options(warn=-1)
+```
+
+
+
+# Introduction
+
+In this markdown we present some of the options for computational authorship analysis in a comparative setting. The markdown will start with some more descriptive techniques and then go into multivariate analyses.
+
+The focus is on some of the candidate authors in the Bitcoin case. As mentioned in class, we are trying to find the best candidate author that could have authored Satoshi Nakamoto's texts. The main challenges here are that we have both a large number of candidates and possibly an incomplete set of candidates.
+
+The data for this analysis has been gathered by our research group. It is not the full data set, but we want to give you several genres in case you would like to engage with the code here some more. However, we won't be able to go into detail for all of these. 
+
+
+
+# `quanteda` and first measures 
+
+## Libraries I
+
+```{r libraries, message=FALSE, warning=FALSE}
+# Load necessary libraries
+library(dplyr)       # For data manipulation
+library(ggplot2)     # For plotting graphs
+library(stringr)     # For string manipulation
+
+# Change this according to your system & needs
+setwd("/Users/dana/Documents/Teaching (recent)/MEDAL")
+nakamoto <- '/Users/dana/Documents/Teaching (recent)/MEDAL/Data/Satoshi/forum'
+dai <- '/Users/dana/Documents/Teaching (recent)/MEDAL/Data/Dai/forum'
+
+# Install and load the quanteda package for text processing
+# install.packages("quanteda")
+library(quanteda)
+```
+
+## Starting with `quanteda` 
+
+Quanteda is a library that focuses on text analysis, so it comes in quite handy when we do any kind of authorship analysis. The package further below, which is designed specifically for authorship analysis, build on quanteda, so we will start of here to give you some time (or code) to explore the 'basics'.
+
+We will start with a comparison between just two sets of forum posts, authored by Nakamoto and Dai. The file paths for those two data sets is defined in the library snippet above.
+
+
+## Average Sentence Length (All Files)
+
+We can automate the process and calculate the ASL for every file in a folder (or just look at the ASL for one file, if we like), and store the results in a dataframe that lets us visualise the results. This way, we can see whether sentence length can tell us something about how the authors typically write their sentences. 
+
+```{r calculate_ASL_with_authors, message=FALSE, warning=FALSE}
+# Combined function to calculate average sentence length and 
+# add author metadata
+calculate_avg_sentence_length_with_authors <- function(folder_path) {
+  # List all .txt files in the given folder
+  file_list <- list.files(folder_path, pattern = "\\.txt$", full.names = TRUE)
+  
+  # Initialize empty list to store results
+  results <- list()
+  
+  # Loop through each file
+  for (file in file_list) {
+    # Read file contents
+    text_data <- readLines(file, warn = FALSE)
+    
+    # Create a corpus from the text
+    corpus_obj <- corpus(text_data)
+    
+    # Reshape corpus into sentences
+    sentences <- corpus_reshape(corpus_obj, to = "sentences")
+    
+    # Tokenize into words
+    tokens_list <- tokens(sentences, what = "word", remove_punct = FALSE)
+    
+    # Calculate sentence lengths
+    sentence_lengths <- sapply(tokens_list, length)
+    
+    # Compute average sentence length
+    avg_length <- mean(sentence_lengths)
+    
+    # Store result using file name as key
+    results[[file]] <- avg_length
+  }
+  
+  # Convert results into a data frame
+  results_df <- data.frame(
+    File = names(results),
+    Average_Sentence_Length = unlist(results),
+    stringsAsFactors = FALSE
+  )
+  
+  # Reset row names
+  rownames(results_df) <- NULL
+  
+  # Extract file names without path
+  results_df$File <- basename(results_df$File)
+  
+  # Derive author names assuming format "Author_filename.txt"
+  results_df$Author <- sub("_.*", "", results_df$File)
+  
+  return(results_df)
+}
+```
+
+The chunk above only defined the function, in order to run it we execute the snippet below.
+
+```{r run_ASL}
+# Run function on both
+nakamoto_df <- calculate_avg_sentence_length_with_authors(nakamoto)
+dai_df <- calculate_avg_sentence_length_with_authors(dai)
+
+# Combine results
+combined_df <- rbind(nakamoto_df, dai_df)
+```
+
+Now we can plot the results to see if the two authors, in our case, differ in their average sentence length. 
+
+```{r visualisation_ASL, fig.width = 8, fig.height = 5}
+# Define consistent colours
+custom_colours <- c("SAT" = "darkorchid",  
+                   "DAI" = "turquoise")  
+
+# Create the boxplot using ggplot2
+ggplot(combined_df, 
+       aes(x = Author, 
+           y = Average_Sentence_Length, 
+           fill = Author)
+       ) +
+  geom_boxplot() +
+  stat_summary(fun = mean, 
+               geom = "point", 
+               shape = 4, 
+               size = 3, 
+               color = "black") +
+  labs(
+    title = "Average Sentence Length per Author",
+    x = "Author",
+    y = "Average Sentence Length"
+  ) +
+  theme_minimal() +
+  scale_fill_manual(values = custom_colours) 
+```
+
+
+## Ideas for Further Work
+
+You could also calculate similar statistics for, for example, average word length or the type-token-ratio. Please note that genre and especially text length will influence these statistics. 
+
+
+---
+
+
+
+# Most Frequent Words
+
+Besides the broader statistics from the last section, we might be interested in the most frequent words used by the two authors as it can tell us something about the stylistic choices. 
+We need some more libraries to get this going.
+
+## Libraries II
+
+```{r libraries_mfw, message = FALSE, warning = FALSE}
+library(tidyverse)  # Collection of packages for data manipulation and visualization
+library(tidytext)   # Tools for text mining using tidy data principles
+library(tidyr)      # Helps tidy data (e.g., pivoting, separating columns)
+library(readr)      # Fast and friendly functions for reading rectangular data
+library(scales)     # Functions for scaling axes and formatting labels in plots
+```
+
+We already defined our folder paths for the section above, but now we need a list of all the files in the two folders.
+
+```{r file_list}
+# List all .txt files in the folders of interest
+SAT_files <- list.files(nakamoto, pattern = "\\.txt$", full.names = TRUE)
+DAI_files <- list.files(dai, pattern = "\\.txt$", full.names = TRUE)
+```
+
+
+## Preprocessing
+
+I decided to strip punctuation and to lowercase (which are analytical choices you may not agree with!), but I kept apostrophes in words like "isn't". Note that I only read in the txt files after I create the preprocessing function so I can apply it. 
+
+```{r preprocessing_mfw}
+# Function to read and preprocess a file
+read_and_clean <- function(file) {
+  text <- read_file(file)
+  # Remove punctuation except apostrophes, convert to lowercase
+  text_clean <- tolower(text)
+  text_clean <- str_replace_all(text_clean, "[^\\w\\s']+", "")  # keep apostrophes
+  tibble(filename = basename(file), text = text_clean)
+}
+
+# Read all files per author
+SAT_texts <- map_dfr(SAT_files, read_and_clean)
+DAI_texts <- map_dfr(DAI_files, read_and_clean)
+```
+
+
+### Matrices
+
+This next bit does all the work, it tokenises and then counts all the words. Note that only words that occur at least once will show up in the matrices. Note also that these are raw frequencies, nothing is normalised in this step.
+
+```{r matrices_mfw}
+# Tokenise into words and count per file
+tokenise_count <- function(df) {
+  df %>%
+    unnest_tokens(word, text, token = "words") %>%
+    filter(word != "filename") %>%  # Exclude problematic token
+    count(filename, word) %>%
+    pivot_wider(
+      names_from = word, 
+      values_from = n, 
+      values_fill = 0
+    ) %>%
+    arrange(filename)
+}
+
+# Create document-term matrices
+SAT_matrix <- tokenise_count(SAT_texts)
+DAI_matrix <- tokenise_count(DAI_texts)
+```
+
+### Normalisation
+
+You can normalise per text or per author depending on what you are analysing/comparing. 
+Usually:  
+Comparing documents/texts? → Normalise per file  
+Comparing authors’ styles? → Normalise per author  
+  
+For the sake of the matrix, we treat each file as a mini-corpus for which we normalise, so we can then see which words occur frequent across texts and are a sign of an author's style.  
+  
+Options to normalise per author (all words by that person) would be for example to look at the sum of each word of that author and normalise the overall count. But since I'm after a matrix in this case, let's normalise per file (to account for the text length).   
+
+In this case I also decided to scale per 1,000,000 words to make the numbers a bit easier to appreciate. Change the scale argument in the normalise_matrix function to use a different scale. This defaults to the pmw now.
+
+
+```{r normalising_the_matrix}
+# Function to normalise each row (i.e., per file)
+normalise_matrix <- function(df, scale = 1e6) {
+  filenames <- df$filename
+  word_counts <- df %>% select(-filename)
+  
+  # Total words per file
+  row_totals <- rowSums(word_counts)
+  
+  # Divide each cell in a row by the total words in that row
+  normalised <- sweep(word_counts, 1, row_totals, FUN = "/") * scale
+  
+  # Round the results to two decimal places
+  normalised <- round(normalised, 2)
+  
+  # Add filename column back
+  normalised_df <- bind_cols(tibble(filename = filenames), as_tibble(normalised))
+  
+  return(normalised_df)
+}
+
+# Apply to matrices
+SAT_matrix_norm <- normalise_matrix(SAT_matrix, scale = 1e6)
+DAI_matrix_norm <- normalise_matrix(DAI_matrix, scale = 1e6)
+```
+
+### Plotting MFW
+
+Now we can also plot again, which might help to understand what we've just done or to explain it to others. This bit will just look at the most frequent words per author.
+
+```{r plotting_frequencies}
+# Get word frequencies for DIC and JEF
+SAT_word_frequencies <- SAT_matrix_norm %>%
+  select(-filename) %>%
+  colSums()
+
+DAI_word_frequencies <- DAI_matrix_norm %>%
+  select(-filename) %>%
+  colSums()
+
+# Create data frames for plotting
+SAT_word_df <- tibble(word = names(SAT_word_frequencies), freq = SAT_word_frequencies)
+DAI_word_df <- tibble(word = names(DAI_word_frequencies), freq = DAI_word_frequencies)
+
+# Top N (e.g., top 20) words
+top_n <- 20
+SAT_top_n_words <- SAT_word_df %>%
+  arrange(desc(freq)) %>%
+  head(top_n)
+
+DAI_top_n_words <- DAI_word_df %>%
+  arrange(desc(freq)) %>%
+  head(top_n)
+
+# Plot SAT top N words
+ggplot(SAT_top_n_words, aes(x = reorder(word, freq), y = freq)) +
+  geom_bar(stat = "identity", fill = "darkorchid") +
+  coord_flip() +
+  scale_y_continuous(labels = label_number(scale = 1, suffix = "", accuracy = 0.01)) +  
+  labs(title = "Top 20 Most Frequent Words (SAT)", x = "Word", y = "Normalised Frequency")
+
+# Plot DAI top N words
+ggplot(DAI_top_n_words, aes(x = reorder(word, freq), y = freq)) +
+  geom_bar(stat = "identity", fill = "turquoise") +
+  coord_flip() +
+  scale_y_continuous(labels = label_number(scale = 1, suffix = "", accuracy = 0.01)) + 
+  labs(title = "Top 20 Most Frequent Words (DAI)", x = "Word", y = "Normalised Frequency")
+```
+
+### Plotting single words of interest
+
+If we want to look at a specific word of interest and how it is used by the specific authors (in this case aggreagated across all texts that contain the word in question), this is how to do it:
+
+```{r box_plotting_specific_words}
+# Filter the normalised data for the word of interest (exact match!)
+SAT_single_word <- SAT_matrix_norm %>% 
+  select(filename, matches("^it$"))
+
+DAI_single_word <- DAI_matrix_norm %>% 
+  select(filename, matches("^it$"))
+
+# Add a column for the author (to distinguish between DIC and JEF)
+SAT_single_word$author <- "SAT"
+DAI_single_word$author <- "DAI"
+
+# Combine the data
+single_word_data <- bind_rows(SAT_single_word, DAI_single_word)
+
+# Gather the data into a tidy format for plotting
+single_word_data_long <- single_word_data %>%
+  pivot_longer(cols = -c(filename, author), names_to = "word", values_to = "frequency")
+
+# Define custom colours for each author
+custom_colours <- c("SAT" = "darkorchid",  
+                   "DAI" = "turquoise")  
+
+# The actual plot
+ggplot(single_word_data_long, 
+       aes(x = author, 
+           y = frequency, 
+           fill = author)) +
+  geom_boxplot() +
+  labs(title = "Box Plot of 'it' Frequencies Across Files", 
+       x = "Author", 
+       y = "Frequency of 'it'",
+       fill = "Author") +
+  scale_fill_manual(values = custom_colours) +  
+  theme_minimal()
+```
+
+
+
+---
+
+
+# Jaccard Distance
+
+The Jaccard distance is a measure of dissimilarity between two sets. It is defined as one minus the size of the intersection divided by the size of the union of the sets. In other words, it quantifies how different two sets are by comparing the number of shared elements to the total number of unique elements across both sets. The Jaccard distance ranges from 0 to 1, where 0 indicates that the sets are identical, and 1 means they have no elements in common. It is commonly used in text analysis or clustering.
+
+We will continue to just look at the forum posts by Dai and Nakamoto. However, we need some additional libraries for this, but we can use the file paths defined above.
+
+Note that there is also a library called `idiolect`, which is designed for (forensic) stylometry and has an option to use Jaccard distance as well.
+
+
+## Libraries III
+
+```{r libraries_jaccard, message = FALSE, warning = FALSE}
+library(tm)           # text processing
+library(tokenizers)   # tokenisation
+library(tidyverse)    # visualisation
+library(ggdendro)     # dendrograms
+library(umap)         # visualisation / projection
+```
+
+
+## Calculating Jaccard Distance
+
+```{r jaccard_functions}
+# Function to preprocess text
+preprocess <- function(text) {
+  text <- iconv(text, 
+                from = "UTF-8", 
+                to = "ASCII//TRANSLIT", 
+                sub = "")  # Convert encoding
+  text <- tolower(text)                     # Convert to lowercase
+  text <- removePunctuation(text)           # Remove punctuation
+  tokens <- unlist(tokenize_words(text))    # Tokenize into words
+  return(unique(tokens))                     # Return unique words
+}
+
+# Function to compute Jaccard Distance between two texts
+jaccard_distance <- function(set1, set2) {
+  intersection <- length(intersect(set1, 
+                                   set2))
+  union <- length(union(set1, 
+                        set2))
+  return(1 - (intersection / union))  # Jaccard Distance formula
+}
+
+# Function to compute Jaccard Distance matrix for a single folder
+compute_jaccard_matrix <- function(folder_path) {
+  files <- list.files(folder_path, pattern = "\\.txt$", full.names = TRUE)
+  
+  text_sets <- lapply(files, function(file) {
+    text <- readLines(file, warn = FALSE)
+    return(preprocess(paste(text, collapse = " "))) # Preprocess and tokenize
+  })
+  
+  num_files <- length(files)
+  distance_matrix <- matrix(0, nrow = num_files, ncol = num_files,
+                            dimnames = list(basename(files), basename(files)))
+  
+  for (i in 1:num_files) {
+    for (j in i:num_files) { 
+      dist <- jaccard_distance(text_sets[[i]], text_sets[[j]])
+      distance_matrix[i, j] <- dist
+      distance_matrix[j, i] <- dist 
+    }
+  }
+  
+  return(distance_matrix)
+}
+
+# Function to compute Jaccard Distance matrix between two folders
+compute_cross_jaccard_matrix <- function(folder1_path, folder2_path) {
+  files1 <- list.files(folder1_path, pattern = "\\.txt$", full.names = TRUE)
+  files2 <- list.files(folder2_path, pattern = "\\.txt$", full.names = TRUE)
+  
+  text_sets1 <- lapply(files1, function(file) {
+    text <- readLines(file, warn = FALSE)
+    return(preprocess(paste(text, collapse = " "))) 
+  })
+  
+  text_sets2 <- lapply(files2, function(file) {
+    text <- readLines(file, warn = FALSE)
+    return(preprocess(paste(text, collapse = " "))) 
+  })
+  
+  num_files1 <- length(files1)
+  num_files2 <- length(files2)
+  
+  distance_matrix <- matrix(0, nrow = num_files1, ncol = num_files2,
+                            dimnames = list(basename(files1), basename(files2)))
+  
+  for (i in 1:num_files1) {
+    for (j in 1:num_files2) { 
+      distance_matrix[i, j] <- jaccard_distance(text_sets1[[i]], text_sets2[[j]])
+    }
+  }
+  
+  return(distance_matrix)
+}
+
+# Wrapper function to compute all three matrices
+compute_jaccard_matrices <- function(folder1_path, folder2_path) {
+  cat("Computing Jaccard distances for Folder 1...\n")
+  matrix1 <- compute_jaccard_matrix(folder1_path)
+  
+  cat("Computing Jaccard distances for Folder 2...\n")
+  matrix2 <- compute_jaccard_matrix(folder2_path)
+  
+  cat("Computing cross-folder Jaccard distances...\n")
+  cross_matrix <- compute_cross_jaccard_matrix(folder1_path, folder2_path)
+  
+  return(list(folder1_matrix = matrix1, folder2_matrix = matrix2, cross_matrix = cross_matrix))
+}
+```
+
+As with the ASL, the snippet above only creates the function we need to do this analysis. The snippet below uses the functions and actually runs the calculation. 
+
+```{r running_jaccard}
+results <- compute_jaccard_matrices(nakamoto, dai)
+cross_matrix <- results$cross_matrix
+nakamoto_matrix <- results$folder1_matrix
+dai_matrix <- results$folder2_matrix
+```
+
+Now with the results stored in the elements defined in the snippet above, we can again visualise the results.
+
+```{r vis_jaccard, fig.width = 8, fig.height = 8}
+# Create a full distance matrix (773 x 773)
+full_matrix <- matrix(NA, nrow = 543 + 230, ncol = 543 + 230)
+
+# Fill in the internal distances for Folder 1 (top-left block)
+full_matrix[1:543, 1:543] <- nakamoto_matrix
+
+# Fill in the internal distances for Folder 2 (bottom-right block)
+full_matrix[544:773, 544:773] <- dai_matrix
+
+# Fill in the cross-folder distances (top-right block)
+full_matrix[1:543, 544:773] <- cross_matrix
+
+# Fill in the symmetric cross-folder distances (bottom-left block)
+full_matrix[544:773, 1:543] <- t(cross_matrix)
+
+# Now you have a combined distance matrix
+
+# Apply UMAP to the full distance matrix
+umap_result <- umap(full_matrix)
+
+# Create a data frame with UMAP results for visualization
+# Get file names for both folders
+file_names <- c(basename(list.files(nakamoto, pattern = "\\.txt$", full.names = TRUE)),
+                basename(list.files(dai, pattern = "\\.txt$", full.names = TRUE)))
+
+# Folder labels (nakamoto for the first 543, dai for the last 230)
+folder_labels <- c(rep("nakamoto", 543), rep("dai", 230))
+
+# Create a data frame to hold the UMAP results
+umap_df <- data.frame(UMAP1 = umap_result$layout[, 1],
+                      UMAP2 = umap_result$layout[, 2],
+                      file = file_names,
+                      folder = folder_labels)
+
+# Plot the UMAP results
+ggplot(umap_df, aes(x = UMAP1, y = UMAP2, color = folder)) +
+  geom_point() +
+  labs(title = "UMAP Projection of All File Distances",
+       x = "UMAP 1", y = "UMAP 2") +
+  theme_minimal() +
+  scale_color_manual(values = c("nakamoto" = "darkorchid", "dai" = "turquoise"),
+                     labels = c("nakamoto" = "SAT", "dai" = "DAI"),
+                     name = "Author")
+```
+
+
+
+---
+
+
+# `stylo` 
+
+For the last bit in this markdown, we will have a look at what the library `stylo` can do for us in terms of computational authorship analysis.
+
+## Libraries IV
+
+```{r libraries_stylo, message = FALSE, warning = FALSE}
+library(stylo)       # stylometric analysis
+```
+
+## Data
+
+For this, we usually require larger amounts of data. This is why there is the option here to read in more data. We will load or read in the corpus by author and genre.
+
+First we define a function called loadc(), which we use to collect all the texts from some set of folder paths in our corpus. It takes two arguments the set of paths and the size of the text sample, and it returns a data frame of meta data and stylo corpus. 
+
+```{r loading_data_function}
+loadc <- function(paths, text_l = 500)
+{
+  corpus <- list()
+  df_rows <- list()
+  
+  for (i in 1:length(paths))
+  {
+    texts <- load.corpus.and.parse(file = "all", 
+                                   paths[i])
+    
+    texts <- list.files(paths[i])[lengths(texts) >= text_l]
+    
+    texts <- load.corpus.and.parse(file = texts, 
+                                   corpus.dir = paths[i], 
+                                   sample.size=text_l, 
+                                   sampling="normal.sampling")
+    
+    aut  <- sub("\\./Data/(\\w+)/\\w+", "\\1", paths[i])
+    reg  <- sub("\\./Data/\\w+/(\\w+)", "\\1", paths[i])
+    cou  <- length(texts)
+    
+    df_rows[[i]] <- data.frame(author = aut, register = reg, count=cou)
+    
+    corpus[[i]] <-  texts
+  }
+  
+  meta <- do.call(rbind, df_rows)  
+  
+  alltexts <- unlist(corpus, recursive = FALSE)
+  mfw <- make.frequency.list(alltexts, value = FALSE, relative = FALSE)
+  
+  return(list(meta = meta, corpus = corpus, mfw = mfw))
+}
+```
+
+Now we can make a list of all the targeted sub corpora and load in that full corpus all at once using the loadc() function. 
+
+```{r loading_data_stylo, message=FALSE}
+paths <- c("./Data/Satoshi/paper", "./Data/Satoshi/forum",
+           "./Data/Back/paper", "./Data/Back/mail",
+           "./Data/Dai/blog", "./Data/Dai/essay", "./Data/Dai/paper",
+           "./Data/Dai/mail", "./Data/Dai/forum",
+           "./Data/Szabo/blog", "./Data/Szabo/essay", "./Data/Szabo/paper", 
+           "./Data/Szabo/mail") 
+
+data <- loadc(paths, text_l = 200)
+```
+
+With the next chunk we can have a look at the corpus we created with that.
+
+```{r corpus_dimensions}
+data$meta
+summary(data$corpus)
+head(data$mfw,50)
+```
+
+## PCA Functions
+
+The first one does the analysis, but allows you to specify which corpora (as indexed by data$meta) and the say how many top most frequent words. 
+
+```{r stylo_pca}
+stylo.pca <- function(corpora, types)
+{
+  texts <- unlist(data$corpus[corpora], recursive= FALSE)
+  
+  freq <- make.table.of.frequencies(texts, 
+                                    data$mfw[1:types], 
+                                    absent.sensitive = TRUE, 
+                                    relative = TRUE)
+  
+  pca<-prcomp(freq, scale = TRUE)
+  
+  scores <- as.data.frame(pca$x)
+  scores$labels <- names(texts)
+  scores$authors <- sub("_.+", "", names(texts))
+  
+  return(list(freq = freq, pca = pca, scores = scores)) 
+  
+}
+```
+
+And the second one plots it. 
+
+```{r plot_pca_labels}
+plot.pca <- function(scores, d1, d2, cex = 0.5, cols = NULL) {
+  if (!is.null(cols)) {
+    col_vector <- cols[scores$authors]
+  } else {
+    default_cols <- c("orangered", "forestgreen", "purple2", "goldenrod", 
+                      "turquoise3", "darkorange4", "dodgerblue3", "orchid4", "limegreen")
+    author_levels <- unique(scores$authors)
+    author_colors <- setNames(default_cols[seq_along(author_levels)], author_levels)
+    col_vector <- author_colors[scores$authors]
+  }
+
+  x <- unlist(scores[d1])
+  y <- unlist(scores[d2])
+  labs <- rownames(scores)
+
+  plot(x, y, type = "n")
+  text(x, y, labels = labs, cex = cex, col = col_vector)
+}
+```
+
+This also plots, but with dots instead of file names.
+
+```{r plot_pca_dots}
+plot.pca.dot <- function(scores, d1, d2, cex = 0.75, cols = NULL) {
+  if (!is.null(cols)) {
+    col_vector <- cols[scores$authors]
+  } else {
+    default_cols <- c("orangered", "forestgreen", "purple2", "goldenrod", 
+                      "turquoise3", "darkorange4", "dodgerblue3", "orchid4", "limegreen")
+    author_levels <- unique(scores$authors)
+    author_colors <- setNames(default_cols[seq_along(author_levels)], author_levels)
+    col_vector <- author_colors[scores$authors]
+  }
+
+  x <- unlist(scores[d1])
+  y <- unlist(scores[d2])
+
+  plot(x, y, pch = 16, cex = cex, col = col_vector)
+}
+```
+
+
+## Running the PCA
+
+The code snippets below will actually run the PCA we defined above.
+In order to keep the colours consistent for each author, let's define a custom colour palette. Note that there is a default, if you do not wish to define custom colours.
+
+```{r consistent_colours}
+my_colors <- c("SAT" = "darkorchid", 
+               "DAI" = "turquoise", 
+               "Back" = "sienna2",
+               "Szabo" = "cornflowerblue") 
+```
+
+Note that `par(mfrow = c(1, 2))` is only there to control the (markdown) layout and you can ignore it for your own work. 
+
+### Back vs. Dai
+
+```{r back_dai, message = FALSE, warning = FALSE, fig.width = 12, fig.height = 6}
+par(mfrow = c(1, 2)) 
+corpora <- c(3, 4, 5, 6, 7, 8, 9)
+pca_out <- stylo.pca(corpora, 50)
+plot.pca(pca_out$scores, 1, 2, cex=.5, cols = my_colors)
+
+corpora <- c(3, 4, 5, 6, 7, 8, 9)
+pca_out <- stylo.pca(corpora, 50)
+plot.pca.dot(pca_out$scores, 1, 2, cex=.75, cols = my_colors)
+```
+
+### Back vs. Nakamoto
+
+```{r back_nakamoto, message = FALSE, warning = FALSE, fig.width = 12, fig.height = 6}
+par(mfrow = c(1, 2)) 
+corpora <- c(1, 2, 3, 4)
+pca_out <- stylo.pca(corpora, 50)
+plot.pca(pca_out$scores, 1, 2, cex=.5, cols = my_colors)
+
+corpora <- c(1, 2, 3, 4)
+pca_out <- stylo.pca(corpora, 50)
+plot.pca.dot(pca_out$scores, 1, 2, cex=.75, cols = my_colors)
+```
+
+### Back vs. Szabo
+
+```{r back_szabo, message = FALSE, warning = FALSE, fig.width = 12, fig.height = 6}
+par(mfrow = c(1, 2)) 
+corpora <- c(3, 4, 10, 11, 12, 13)
+pca_out <- stylo.pca(corpora, 50)
+plot.pca(pca_out$scores, 1, 2, cex=.5, cols = my_colors)
+
+corpora <- c(3, 4, 10, 11, 12, 13)
+pca_out <- stylo.pca(corpora, 50)
+plot.pca.dot(pca_out$scores, 1, 2, cex=.75, cols = my_colors)
+```
+
+### Dai vs. Nakamoto
+
+```{r dai_nakamoto, message = FALSE, warning = FALSE, fig.width = 12, fig.height = 6}
+par(mfrow = c(1, 2)) 
+corpora <- c(1, 2, 5, 6, 7, 8, 9)
+pca_out <- stylo.pca(corpora, 50)
+plot.pca(pca_out$scores, 1, 2, cex=.5, cols = my_colors)
+
+corpora <- c(1, 2, 5, 6, 7, 8, 9)
+pca_out <- stylo.pca(corpora, 50)
+plot.pca.dot(pca_out$scores, 1, 2, cex=.75, cols = my_colors)
+```
+
+### Dai vs. Szabo
+
+```{r dai_szabo, message = FALSE, warning = FALSE, fig.width = 12, fig.height = 6}
+par(mfrow = c(1, 2)) 
+corpora <- c(5, 6, 7, 8, 9, 10, 11, 12, 13)
+pca_out <- stylo.pca(corpora, 50)
+plot.pca(pca_out$scores, 1, 2, cex=.5, cols = my_colors)
+
+corpora <- c(5, 6, 7, 8, 9, 10, 11, 12, 13)
+pca_out <- stylo.pca(corpora, 50)
+plot.pca.dot(pca_out$scores, 1, 2, cex=.75, cols = my_colors)
+```
+
+### Nakamoto vs. Szabo
+
+```{r nakamoto_szabo, message = FALSE, warning = FALSE, fig.width = 12, fig.height = 6}
+par(mfrow = c(1, 2)) 
+corpora <- c(1, 2, 10, 11, 12, 13)
+pca_out <- stylo.pca(corpora, 50)
+plot.pca(pca_out$scores, 1, 2, cex=.5, cols = my_colors)
+
+corpora <- c(1, 2, 10, 11, 12, 13)
+pca_out <- stylo.pca(corpora, 50)
+plot.pca.dot(pca_out$scores, 1, 2, cex=.75, cols = my_colors)
+```
+
+
+### All Four Authors
+
+```{r all_authors, message = FALSE, warning = FALSE, fig.width = 12, fig.height = 6}
+corpora <- c(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13)
+pca_out <- stylo.pca(corpora, 50)
+plot.pca(pca_out$scores, 1, 2, cex=.5, cols = my_colors)
+
+corpora <- c(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13)
+pca_out <- stylo.pca(corpora, 50)
+plot.pca.dot(pca_out$scores, 1, 2, cex=.75, cols = my_colors)
+```
+
+
+### Authors by themselves
+
+In case we want to investigate outliers within the authors, these plots might help us to see those.
+
+```{r author_themselves, message = FALSE, warning = FALSE, fig.width = 10, fig.height = 10}
+par(mfrow = c(2, 2)) 
+corpora <- c(1, 2)
+pca_out <- stylo.pca(corpora, 50)
+plot.pca(pca_out$scores, 1, 2, cex=.5)
+
+corpora <- c(3, 4)
+pca_out <- stylo.pca(corpora, 50)
+plot.pca(pca_out$scores, 1, 2, cex=.5)
+
+corpora <- c(5, 6, 7, 8, 9)
+pca_out <- stylo.pca(corpora, 50)
+plot.pca(pca_out$scores, 1, 2, cex=.5)
+
+corpora <- c(10, 11, 12 ,13)
+pca_out <- stylo.pca(corpora, 50)
+plot.pca(pca_out$scores, 1, 2, cex=.5)
+```
+
