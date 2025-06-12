@@ -1,0 +1,205 @@
+---
+title: "Stylometry for Authorship Analysis II"
+author: "Dana Roemling"
+date: "2025-03-17"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly  
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Stylometry - Part II
+
+```{r libraries}
+library(idiolect)     # authorship analysis library
+library(tm)           # text processing
+library(tokenizers)   # tokenisation
+library(ggplot2)      # visualisation
+library(ggdendro)     # dendrograms
+library(stringr)     # For string manipulation
+library(dplyr)       # For data manipulation
+
+# Defining folder patchs
+folder_path_arms <- "/Users/dana/Documents/Teaching (recent)/HY/Week 5/JEF_DIC/" 
+path_to_known <- "/Users/dana/Documents/Teaching (recent)/HY/Week 5/JEF_DIC/"  
+path_to_disputed <- "/Users/dana/Documents/Teaching (recent)/HY/Week 5/DISPUTED" 
+folder_path_ripper <- "/Users/dana/Documents/Teaching (recent)/HY/Week 5/JTR/corpus"
+```
+
+## Jaccard Distance
+
+This is a semi-manual way to compute the Jaccard Distance. It concists of preprocessing the text we are inputting, then finding overlap and union of the texts and then using that to compute the Jaccard Coefficient and then Distance.
+
+```{r jaccard_manual}
+# Function to preprocess text
+preprocess <- function(text) {
+  text <- tolower(text)                    # Convert to lowercase
+  text <- removePunctuation(text)          # Remove punctuation
+  tokens <- unlist(tokenize_words(text))   # Tokenise into words
+  return(unique(tokens))                   # Return unique words
+}
+
+# Function to compute Jaccard Distance
+jaccard_distance_preprocessing <- function(text1, text2) {
+  set1 <- preprocess(text1)
+  set2 <- preprocess(text2)
+
+  intersection <- length(intersect(set1, 
+                                   set2))
+  union <- length(union(set1, 
+                        set2))
+
+  return(1 - (intersection / union))  # Jaccard Distance formula
+}
+
+# Example texts
+text1 <- "the dog chased the cat down the street"
+text2 <- "a bit further down the street, everyone has a bigger house"
+
+# Compute Jaccard Distance
+distance <- jaccard_distance_preprocessing(text1, 
+                                           text2)
+print(paste("Jaccard Distance:", 
+            round(distance, 
+                  3)))
+```
+
+Instead of doing this for each text manually, we can also use R to input a folder with .txt files, for example, and output a matrix of the Jaccard Distances. 
+
+```{r jaccard_matrix}
+# Function to preprocess text (almost as above!)
+# Added encoding conversion to make sure read files all work the same
+preprocess <- function(text) {
+  text <- iconv(text, 
+                from = "UTF-8", 
+                to = "ASCII//TRANSLIT", 
+                sub = "")  # Convert encoding
+  text <- tolower(text)                     # Convert to lowercase
+  text <- removePunctuation(text)           # Remove punctuation
+  tokens <- unlist(tokenize_words(text))    # Tokenize into words
+  return(unique(tokens))                     # Return unique words
+}
+
+# Function to compute Jaccard Distance between two texts
+# Different to above, preprocessing is now outside of this function!
+jaccard_distance <- function(set1, set2) {
+  intersection <- length(intersect(set1, 
+                                   set2))
+  union <- length(union(set1, 
+                        set2))
+  return(1 - (intersection / union))  # Jaccard Distance formula
+}
+
+# Function to process all files in a folder and compute Jaccard Distance matrix
+compute_jaccard_matrix <- function(folder_path) {
+  # Get all .txt file names
+  files <- list.files(folder_path, 
+                      pattern = "\\.txt$", 
+                      full.names = TRUE)
+  
+  # Read and preprocess each file
+  text_sets <- lapply(files, function(file) {
+    text <- readLines(file, 
+                      warn = FALSE) # Read file
+    return(preprocess(paste(text, 
+                            collapse = " "))) # Preprocess and tokenize
+  })
+  
+  # Create an empty matrix
+  num_files <- length(files)
+  distance_matrix <- matrix(0, 
+                            nrow = num_files, 
+                            ncol = num_files,
+                            dimnames = list(basename(files), 
+                                            basename(files)))
+  
+  # Compute Jaccard Distance for each pair
+  for (i in 1:num_files) {
+    for (j in i:num_files) { # Avoid redundant calculations
+      dist <- jaccard_distance(text_sets[[i]], 
+                               text_sets[[j]])
+      distance_matrix[i, j] <- dist
+      distance_matrix[j, i] <- dist # Symmetric matrix
+    }
+  }
+  
+  return(distance_matrix)
+}
+
+# Example usage:
+jaccard_matrix_arms <- compute_jaccard_matrix(folder_path_arms)
+jaccard_matrix_ripper <- compute_jaccard_matrix(folder_path_ripper)
+```
+
+Although the matrix itself can already show you something interesting, it might help to visualise the results in a clustered form, similar to what Nini did in his analysis. But we'll resort to using a very classic dendrogram, which admittedly is not the best for these amounts of texts to easily see which text is where. 
+
+```{r jaccard_visualisation, fig.width = 10}
+# Convert the Jaccard distance matrix into a distance object
+jaccard_dist <- as.dist(jaccard_matrix_ripper)
+
+# Perform hierarchical clustering
+hc <- hclust(jaccard_dist, 
+             method = "ward.D2")  # Ward's method for compact clusters
+
+# Convert to dendrogram format for ggplot
+hc_dendro <- as.dendrogram(hc)
+hc_data <- dendro_data(hc_dendro)
+
+# Plot with ggplot2
+ggplot(segment(hc_data)) +
+  geom_segment(aes(x = x, 
+                   y = y, 
+                   xend = xend, 
+                   yend = yend), 
+               color = "orchid4") +
+  theme_minimal() +
+  ggtitle("Hierarchical Clustering of Texts") +
+  xlab("Documents") +
+  ylab("Height") +
+  theme(axis.text.x = element_text(angle = 90, 
+                                   hjust = 1))
+```
+
+## Jaccard in 'idiolect' library
+
+We can also go back to the 'idiolect' library from last session. This also has the option to calculate Jaccard Distances and use them to show you the distance between texts. If we use the texts from last session, we can easily create a visualisation based on the Jaccard Coefficient. 
+
+If you wanted to apply this function to the Jack the Ripper text, you need to decide which of the texts are the known documents (maybe following Nini's results) and which ones are questioned. 
+
+```{r idiolect_jaccard}
+# Read in the data
+known_writing <- create_corpus(path_to_known)  
+questioned_writing <- create_corpus(path_to_disputed)  
+
+# Do the n-gram tracing and set coefficient to jaccard
+ngrams <- ngram_tracing(questioned_writing, 
+                        known_writing,
+                        coefficient = "jaccard")
+```
+
+Visualising n-gram traching
+
+```{r plotting_similarity, fig.width = 10}
+# Create a bar plot to compare similarity scores
+ggplot(ngrams, 
+       aes(x = Q, 
+           y = score, 
+           fill = K)
+       ) +
+  geom_bar(stat = "identity", 
+           position = "dodge") +  # Create side-by-side bars
+  labs(title = "Similarity Scores of Questioned Documents to DIC and JEF",
+       x = "Questioned Document", 
+       y = "Similarity Score",
+       fill = "Known Document") +
+  theme_minimal() +  
+  scale_fill_manual(values = c("darkolivegreen3", 
+                               "mediumorchid4")) +  # Set custom colors
+  theme(legend.position = "bottom") +  
+  scale_x_discrete(labels = function(x) str_replace(x, ".txt", ""))  # Clean up x-axis labels
+```

@@ -1,0 +1,499 @@
+---
+title: "Stylometry for Authorship Analysis"
+author: "Dana Roemling"
+date: "2025-03-13"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly  
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# R Code for Text Processing and Analysis
+
+## Setup
+
+```{r libraries, include = FALSE}
+# Load necessary libraries
+library(dplyr)       # For data manipulation
+library(ggplot2)     # For plotting graphs
+library(stringr)     # For string manipulation
+```
+
+## Starting with `quanteda` 
+
+Quanteda is a library that focuses on text analysis, so it comes in quite handy when we do any kind of authorship analysis. The package further below, which is designed specifically for authorship analysis, build on quanteda, so we will start of here to give you some time (or code) to explore the 'basics'. 
+
+```{r quanteda_install}
+# Install and load the quanteda package for text processing
+# install.packages("quanteda")
+library(quanteda)
+```
+
+Reading in the files I have provided is likely going to trigger a warning each time a file is read. You can ignore them in this case, but if you want to suppress them:
+
+```{r warnings}
+options(warn=-1)
+# options(warn=0) restores the default.
+```
+
+You can either set the file path here or do that for the respective function alone. 
+
+```{r file_path}
+# Change this according to your system & needs
+path_to_file <- "/Users/dana/Documents/Teaching (recent)/HY/Week 5/JEF_DIC/DIC_001.txt"  
+path_to_folder <- "/Users/dana/Documents/Teaching (recent)/HY/Week 5/JEF_DIC/"  
+path_to_known <- path_to_folder
+path_to_disputed <- "/Users/dana/Documents/Teaching (recent)/HY/Week 5/DISPUTED"  
+```
+
+
+## Average Sentence Length (Single)
+
+If we want to calculate the ASL for a single text file, we first read in that file, process it into both sentences and tokens and then we can use those to calculate the ASL. 
+
+Please consider that ASL is dependent on several factors, for example genre and register, so blindly comparing the numbers might not give you the desired results.
+
+```{r ASL_single}
+# Set the path to your text file
+# path_to_file <- "/PATH/FILE_001.txt"  
+
+# Read the text file into R
+text_data <- readLines(path_to_file)
+
+# Create a corpus from the text data using quanteda
+corpus <- corpus(text_data)
+
+# Split the corpus into sentences
+sentences <- corpus_reshape(corpus, 
+                            to = "sentences")
+
+# Tokenise the sentences into words (keeping punctuation)
+tokens <- tokens(sentences, 
+                 what = "word", 
+                 remove_punct = FALSE)
+
+# Count the number of tokens (words) in each sentence
+sentence_lengths <- sapply(tokens, 
+                           length)
+
+# Print sentence lengths
+print(sentence_lengths)
+
+# Calculate and print the average sentence length
+average_sentence_length <- mean(sentence_lengths)
+print(paste("Average sentence length: ", 
+            average_sentence_length))
+```
+
+## Average Sentence Length (Multiple)
+
+Rather than doing this for every file manually, we can also automate the process and calculate the ASL for every file in a folder, for example, and store the results in a dataframe that lets us visualise the results. 
+
+```{r ASL_folder}
+# Define the function to process all .txt files in a folder
+calculate_avg_sentence_length <- function(folder_path) {
+  # Get the list of all .txt files in the folder
+  file_list <- list.files(folder_path, 
+                          pattern = "\\.txt$", 
+                          full.names = TRUE)
+
+  # Create an empty list to store the results
+  results <- list()
+
+  # Loop over each file
+  for (file in file_list) {
+    # Read the text file into R
+    text_data <- readLines(file)
+
+    # Create a corpus from the text data
+    corpus <- corpus(text_data)
+
+    # Split the corpus into sentences
+    sentences <- corpus_reshape(corpus, 
+                                to = "sentences")
+
+    # Tokenize the sentences into words
+    tokens <- tokens(sentences, 
+                     what = "word", 
+                     remove_punct = FALSE)
+
+    # Count the number of tokens (words) in each sentence
+    sentence_lengths <- sapply(tokens, 
+                               length)
+
+    # Calculate the average sentence length for the file
+    avg_sentence_length <- mean(sentence_lengths)
+
+    # Store the result
+    results[[file]] <- avg_sentence_length
+  }
+
+  # Convert the results to a data frame
+  results_df <- data.frame(
+    File = names(results),
+    Average_Sentence_Length = unlist(results)
+  )
+
+  return(results_df)
+}
+
+# Run the function
+avg_sentence_lengths_df <- calculate_avg_sentence_length(path_to_folder)
+rownames(avg_sentence_lengths_df) <- 1:nrow(avg_sentence_lengths_df)
+```
+
+In order to cluster our results by author, for example for visualisation, we iterate over the files and add an author column depending on the file name.
+We could also add this to the function above, but for clarity, I have seperated these steps. 
+
+```{r author_column_1}
+# Function to add author information to the results dataframe
+add_author_info <- function(results_df) {
+  
+  # Extract just the filename (removing the full path)
+  results_df$File <- basename(results_df$File)
+  
+  # Extract author name (assumes it's before the first underscore "_")
+  results_df$Author <- gsub("_.*", 
+                            "", 
+                            results_df$File)  # Modify if needed for different formats
+  
+  return(results_df)
+}
+
+# Add author information to the dataframe
+avg_sentence_lengths_df <- add_author_info(avg_sentence_lengths_df)
+```
+
+Now we can plot the results to see if the two authors, in our case, differ in their average sentence length. 
+
+```{r visualisation_ASL}
+# Create the boxplot using ggplot2
+ggplot(avg_sentence_lengths_df, 
+       aes(x = Author, 
+           y = Average_Sentence_Length, 
+           fill = Author)
+       ) +
+  geom_boxplot() +
+  stat_summary(fun = mean, 
+               geom = "point", 
+               shape = 4, 
+               size = 3, 
+               color = "black") +
+  labs(
+    title = "Average Sentence Length per Author",
+    x = "Author",
+    y = "Average Sentence Length"
+  ) +
+  theme_minimal() +
+  scale_fill_brewer(palette = "Set3")  
+```
+
+## Type Token Ratio (Single)
+
+There are numerous features we might be interested in, but just as another example we will look at the Type Token Ratio. Please remember that this feature is DEPENDENT on text length and ideally you would normalise for text length. 
+
+```{r ttr_single}
+# Set the path to the text file
+# path_to_file <- "/PATH/FILE_001.txt"  
+
+# Read the text file into R
+text_data <- readLines(path_to_file)
+
+# Create a corpus from the text data
+corpus <- corpus(text_data)
+
+# Tokenize the text
+tokens <- tokens(corpus, 
+                 what = "word", 
+                 remove_punct = TRUE)
+
+# Calculate the number of types (unique words)
+num_types <- length(unique(unlist(tokens)))
+
+# Calculate the number of tokens (total words)
+num_tokens <- length(unlist(tokens))
+
+# Compute Type-Token Ratio (TTR)
+ttr <- num_types / num_tokens
+
+# Print TTR
+print(paste("Type-Token Ratio (TTR) for the document:", 
+            ttr))
+```
+
+## Type Token Ratio (Multiple)
+
+We can similarly automate this step.
+
+```{r ttr_multiple}
+# Define a function to calculate TTR for all .txt files in a folder
+calculate_ttr <- function(folder_path) {
+  
+  # Get the list of all .txt files in the folder
+  file_list <- list.files(folder_path, 
+                          pattern = "\\.txt$", 
+                          full.names = TRUE)
+  
+  # Create an empty list to store results
+  results <- list()
+  
+  # Loop over each file
+  for (file in file_list) {
+    # Read the text file into R
+    text_data <- readLines(file)
+    
+    # Create a corpus from the text data
+    corpus <- corpus(text_data)
+    
+    # Tokenize the text
+    tokens <- tokens(corpus, 
+                     what = "word", 
+                     remove_punct = TRUE)
+    
+    # Calculate the number of types (unique words)
+    num_types <- length(unique(unlist(tokens)))
+    
+    # Calculate the number of tokens (total words)
+    num_tokens <- length(unlist(tokens))
+    
+    # Compute Type-Token Ratio (TTR)
+    ttr <- num_types / num_tokens
+    
+    # Store the result (file name and TTR value)
+    results[[file]] <- ttr
+  }
+  
+  # Convert the results into a data frame
+  results_df <- data.frame(
+    File = names(results),
+    Type_Token_Ratio = unlist(results)
+  )
+  
+  return(results_df)
+}
+
+# Run the function
+ttr_results_df <- calculate_ttr(path_to_folder)
+rownames(ttr_results_df) <- 1:nrow(ttr_results_df)
+```
+
+In order to visualise by author, we need to add the author column again. 
+
+```{r author_column_2}
+# Function to extract author from filename
+extract_author <- function(filepath) {
+  filename <- basename(filepath)  # Get just the filename (remove the path)
+  author <- strsplit(filename, "_")[[1]][1]  # Extract author (before first "_")
+  return(author)
+}
+
+# Apply author extraction and add as a new column
+ttr_results_df$Author <- sapply(ttr_results_df$File, 
+                                extract_author)
+```
+
+And now we can visualise the TTR.
+
+```{r ttr_visualisation}
+ggplot(ttr_results_df, 
+       aes(x = Author, 
+           y = Type_Token_Ratio, 
+           fill = Author)
+       ) +
+  geom_boxplot() +  
+  stat_summary(fun = mean, 
+               geom = "point", 
+               shape = 4, 
+               size = 3, 
+               color = "black") + 
+  labs(title = "Distribution of Type-Token Ratios (TTR) by Author",
+       x = "Author",
+       y = "Type-Token Ratio") +
+  theme_minimal() +
+  theme(legend.position = "none") + 
+  scale_fill_brewer(palette = "Set3") 
+```
+
+## Average Word Length (Single)
+
+```{r AWL_single}
+# Set the path to your text file
+# path_to_file <- "/PATH/FILE_001.txt"  
+
+# Read the text file into R
+text_data <- readLines(path_to_file)
+
+# Create a corpus from the text data
+corpus <- corpus(text_data)
+
+# Tokenize the corpus into words (removing punctuation)
+tokens <- tokens(corpus, 
+                 what = "word", 
+                 remove_punct = TRUE)
+
+# Flatten the tokens into a single vector of words
+word_list <- unlist(tokens)
+
+# Compute word lengths (number of characters per word)
+word_lengths <- nchar(word_list)
+
+# Calculate and print the average word length
+average_word_length <- mean(word_lengths, na.rm = TRUE)
+print(paste("Average word length: ", average_word_length))
+```
+
+## Average Word Length (Multiple)
+
+Or, again, for the whole folder.
+
+```{r AWL_folder}
+# Define the function to process all .txt files in a folder
+calculate_avg_word_length <- function(folder_path) {
+  # Get the list of all .txt files in the folder
+  file_list <- list.files(folder_path, 
+                          pattern = "\\.txt$", 
+                          full.names = TRUE)
+
+  # Create an empty list to store the results
+  results <- list()
+
+  # Loop over each file
+  for (file in file_list) {
+    # Read the text file into R
+    text_data <- readLines(file)
+
+    # Create a corpus from the text data
+    corpus <- corpus(text_data)
+
+    tokens <- tokens(corpus, 
+                 what = "word", 
+                 remove_punct = TRUE)
+
+    # Flatten the tokens into a single vector of words
+    word_list <- unlist(tokens)
+
+    # Compute word lengths (number of characters per word)
+    word_lengths <- nchar(word_list)
+
+    # Calculate the average word length for the file
+    average_word_length <- mean(word_lengths, na.rm = TRUE)
+
+    # Store the result
+    results[[file]] <- average_word_length
+  }
+
+  # Convert the results to a data frame
+  results_df <- data.frame(
+    File = names(results),
+    average_word_length = unlist(results)
+  )
+
+  return(results_df)
+}
+
+# Run the function
+avg_word_lengths_df <- calculate_avg_word_length(path_to_folder)
+rownames(avg_word_lengths_df) <- 1:nrow(avg_word_lengths_df)
+```
+
+Extracting the author name again.
+
+```{r author_column_3}
+# Function to extract author from filename
+extract_author <- function(filepath) {
+  filename <- basename(filepath)  # Get just the filename (remove the path)
+  author <- strsplit(filename, "_")[[1]][1]  # Extract author (before first "_")
+  return(author)
+}
+
+# Apply author extraction and add as a new column
+avg_word_lengths_df$Author <- sapply(avg_word_lengths_df$File, 
+                                     extract_author)
+```
+
+And now we can visualise the AWL.
+
+```{r AWL_visualisation}
+ggplot(avg_word_lengths_df, 
+       aes(x = Author, 
+           y = average_word_length, 
+           fill = Author)
+       ) +
+  geom_boxplot() +  
+  stat_summary(fun = mean, 
+               geom = "point", 
+               shape = 4, 
+               size = 3, 
+               color = "black") + 
+  labs(title = "Distribution of Average Word Length by Author",
+       x = "Author",
+       y = "Average Word Length") +
+  theme_minimal() +
+  theme(legend.position = "none") + 
+  scale_fill_brewer(palette = "Set3") 
+```
+
+---
+
+## Comparison Analysis with `idiolect` 
+
+Let's also make use of the idiolect package prepared by the forensic linguist Andrea Nini, who has also worked on the case we have discussed in class. 
+
+This package automates analysis for us. Below we will use the ngram function to compare the ngrams used by the two authors. 
+
+```{r starting_idiolect, echo = FALSE}
+# Install and load the idiolect package for forensic linguistics analysis
+# install.packages("idiolect")
+library(idiolect)
+
+# Read in the folders separated by known and disputed files
+known_writing <- create_corpus(path_to_known)  
+questioned_writing <- create_corpus(path_to_disputed)  
+
+# Perform n-gram tracing between the questioned and known writings
+# Depending on your computer and the parameters, this will take a while
+# The default is using character n-grams with the order 9
+# Details:
+# https://andreanini.github.io/idiolect/reference/ngram_tracing.html
+ngrams <- ngram_tracing(questioned_writing, 
+                        known_writing,
+                        features = TRUE,
+                        n = 7)
+
+# the lower the n or order, the quicker it runs, but also the more similar the 
+# texts appear to be
+
+# Check the results using head() or summary()
+# head(ngrams)
+# summary(ngrams)
+```
+
+If you're interested to see what the overlapping n-grams were, you can have a look at the column unique_overlap in the n_grams dataframe. This is only available if in running the function you have set features = TRUE. 
+
+
+## Visualising n-gram traching
+
+```{r plotting_similarity, fig.width = 10}
+# Create a bar plot to compare similarity scores
+ggplot(ngrams, 
+       aes(x = Q, 
+           y = score, 
+           fill = K)
+       ) +
+  geom_bar(stat = "identity", 
+           position = "dodge") +  # Create side-by-side bars
+  labs(title = "Similarity Scores of Questioned Documents to DIC and JEF",
+       x = "Questioned Document", 
+       y = "Similarity Score",
+       fill = "Known Document") +
+  theme_minimal() +  
+  scale_fill_manual(values = c("darkolivegreen3", 
+                               "mediumorchid4")) +  # Set custom colors
+  theme(legend.position = "bottom") +  
+  scale_x_discrete(labels = function(x) str_replace(x, ".txt", ""))  # Clean up x-axis labels
+```
