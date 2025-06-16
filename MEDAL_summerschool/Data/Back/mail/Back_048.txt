@@ -1,0 +1,15 @@
+From: "Adam Back" <adam@cypherspace.org>
+Sent: Thur 8/21/2008 1:55:59 PM (UTC+01:00) To: satoshi@anonymousspeech.com
+Cc: adam@cypherspace.org
+Subject: Re: Citation of your Hashcash paper
+Yes citation looks fine, I'll take a look at your paper. You maybe aware of the "B-money" proposal, | guess google can find it for you, by Wei Dai which sounds to be somewhat related to your paper. (The b-money idea is just described concisely on his web page, he didnt write up a paper).
+Adam
+On Wed, Aug 20, 2008 at 6:30 PM, satoshi@anonymousspeech.com <satoshi@anonymousspeech.com> wrote:
+> I'm getting ready to release a paper that references your Hashcash paper and | wanted to make sure | have the citation right. Here's what | have:
+>
+> [5] A. Back, "Hashcash - a denial of service counter-measure," http://www.hashcash.org/papers/hashcash.pdf, 2002.
+>
+> | think you would find it interesting, since it finds a new use for hash-based proof-of-work as a way to make e-cash work. You can download a pre-release draft at http://www.upload.ae/file/6157/ecash- pdf.html Feel free to forward it to anyone else you think would be interested. I'm also nearly finished with a C++ implementation to release as open source.
+>
+> Title: Electronic Cash Without a Trusted Third Party
+>
