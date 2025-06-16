@@ -1,0 +1,57 @@
+Introduction
+
+ parties, comprising the set  (“universe”), want to engage in a protocol. These parties can form coalitions to gang up on each other. The set of possible coalitions is just the set of all subsets of , .
+
+The protocol designer should first specify what coalitions are to be allowed and forbidden. If the parties have rational self-interest, only coalitions whose members have an incentive to not collude, to either compute an incorrect result, or to violate the privacy of any player, should be allowed the potential to disrupt the protocol. Invoking “incentive” implies an economic or game-theoretic analysis of coalitions, which will be considered in a future article.
+
+For now, we just observe that the protocol designer needs to draw from  a set of allowed (“good”) coalitions . Any set of parties in  is a coalition sufficient to successfully complete the protocol. Also, draw from  a set disjoint from  of disallowed (“bad”) coalitions  which cannot be allowed the opportunity to disrupt the protocol. If , then we say that the partition is unambiguous. Also, the sets in  are the complements of the sets in , and vice versa.
+
+To produce a secure protocol, these coalitions need to meet certain criteria. Particularly interesting is the quorum system, a set of good coalitions, every member of which intersects in at least one party. Each quorum can act on behalf of the system to complete the protocol. Intersection facilitates consistency across quorums. For example, if an operation occurs in two quorums, then at least one party observes both. Indeed, a fault-tolerant or secure quorum system intersects in a set containing sufficiently many parties to guarantee correctness. See, for example, the masking and dissemination quorum systems used by Malkhi & Reiter [MR97] to design a replicated database secure against Byzantine faults by bad coalitions.
+
+[BW98], following the trail blazed by among others [HM97] and [NW96], have shown that if any single party can be trusted with correctness, then a quorum system is necessary and sufficient for the privacy of inputs to a multiparty computation[S97] against resource unbounded adversaries. Classical analysis of multiparty computation concluded that a threshold of more than half of the parties is necessary and sufficient for private computation. This is just a special case of [BW98] result. Any threshold system whose threshold exceeds  is also a quorum system – there are only  parties, so two coalitions of size  must contain at least one party in common, thus forming a quorum system.
+
+The classical analysis also concluded that a majority threshold is necessary and sufficient for correct multiparty computation, i.e. secure against active Byzantine faults in minorities with polynomial amounts of resources. A two-thirds majority is necessary against resource unbounded adversaries. I am aware of no correctness result as yet for quorum systems in multiparty computation.
+
+Constraint Families
+
+Masking
+
+First let’s consider quorum systems which intersect, not just in a single party, making them intolerant to any faults in these parties, but rather in enough parties to complete the protocol in a way tolerant of up to  faults, . One way to do this is called masking which constrains quorum systems to satisfy the following:
+
+M1: None of the sets of correct servers which contain the latest value is a bad coalition. To achieve this, any quorum intersection minus any bad coalition should not be a subset of any other bad coalition. Formally: for all and for all ,  is not a subset of .
+
+M2: No bad coalition can disable all quorums. Formally: for all , there exists some  such that  and  are disjoint.
+
+These constraints are sufficient to ensure that a replicated database is updated consistently and correctly, iff .
+
+Dissemination
+
+To get a dissemination quorum system we relax the first constrain. Now we just want every intersection to not be contained in any bad coalition:
+
+D1: Any quorum intersection is not a subset of any bad coalition. Formally: for all  and for all ,  is not a subset of .
+
+D2: No bad coalition can disable all quorums. Formally: for all , there exists some  such that  and  are disjoint.
+
+These constrains are sufficient to ensure that a replicated database is updated consistently, iff . Correctness of the data must be ensured by some other means, e.g. external signing and verification of digital signatures.
+
+Particular Classes
+
+Threshold
+
+If , then is the threshold masking quorum system for . If , then the threshold dissemination quorum system for  is given by .
+
+Grid
+
+Suppose . The parties can be arranged into a  grid. Then a grid masking quorum system for  is given by . A grid dissemination quorum system is the same as in the masking case, except .
+
+Partition
+
+Here we partition  into  clusters and express the assumption that at any time, at most one cluster is faulty. Thus  is a partition of . Then the partition masking quorum system is given by , and the dissemination quorum system is given by .
+
+Crumbling Wall
+
+This falls short of dissemination or masking but is also more efficient. The parties are arranged in rows of various widths. A quorum is the union of one full row and one party from every row below the full row. Many of the quorums in a crumbling wall are small minorities; often of .
+
+Conclusion
+
+The study of coalitions, and in particular quorum systems, provides a seemingly comprehensive theory of multiparty protocols which goes well beyond the confining linear world of thresholds.
