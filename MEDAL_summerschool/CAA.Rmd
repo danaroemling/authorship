@@ -282,11 +282,13 @@ Now we can also plot again, which might help to understand what we've just done 
 # Get word frequencies for DIC and JEF
 SAT_word_frequencies <- SAT_matrix_norm %>%
   select(-filename) %>%
-  colSums()
+  summarise(across(everything(), mean)) %>%  
+  unlist()
 
 DAI_word_frequencies <- DAI_matrix_norm %>%
   select(-filename) %>%
-  colSums()
+  summarise(across(everything(), mean)) %>%  
+  unlist()
 
 # Create data frames for plotting
 SAT_word_df <- tibble(word = names(SAT_word_frequencies), freq = SAT_word_frequencies)
@@ -307,14 +309,14 @@ ggplot(SAT_top_n_words, aes(x = reorder(word, freq), y = freq)) +
   geom_bar(stat = "identity", fill = "darkorchid") +
   coord_flip() +
   scale_y_continuous(labels = label_number(scale = 1, suffix = "", accuracy = 0.01)) +  
-  labs(title = "Top 20 Most Frequent Words (SAT)", x = "Word", y = "Normalised Frequency")
+  labs(title = "Top 20 Most Frequent Words (SAT)", x = "Word", y = "Normalised Frequency per Million Words")
 
 # Plot DAI top N words
 ggplot(DAI_top_n_words, aes(x = reorder(word, freq), y = freq)) +
   geom_bar(stat = "identity", fill = "turquoise") +
   coord_flip() +
   scale_y_continuous(labels = label_number(scale = 1, suffix = "", accuracy = 0.01)) + 
-  labs(title = "Top 20 Most Frequent Words (DAI)", x = "Word", y = "Normalised Frequency")
+  labs(title = "Top 20 Most Frequent Words (DAI)", x = "Word", y = "Normalised Frequency per Million Words")
 ```
 
 ### Plotting single words of interest
