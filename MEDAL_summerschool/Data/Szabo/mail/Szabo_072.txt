@@ -1,0 +1,2 @@
+Perhaps some hacks (ab)used by virus writers might be useful here.
+We might hide "readdat.exe" inside a larger "innocuous.exe" and scramble it with the "mutation engine", which creates a unique signature for each copy of readdat.exe's code (including the engine itself, which bootstraps from a very short common code sequence).  The result is they have no signature to search for, even if they already have a copy of "readdat.exe" and the mutation engine.

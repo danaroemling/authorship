@@ -1,0 +1,4 @@
+The wiretap chip has generated quite a bit of new interest in learning how to protect our electronic privacy.  We need to bring folks up to speed quickly on practical use of crypto, so I'm going to write up some mini-FAQs.  Experts, please send me succinct descriptions of PGP, anonymous remailers, the Clipper wiretap chip, GMS, or anything else you feel is an important basic.  
+Alternatively, write up and post your own FAQ, and we'll sort it out later.
+
+Here is an overview of computer-based crypto that Bill Stewart posted a few weeks ago.
