@@ -279,7 +279,7 @@ DAI_matrix_norm <- normalise_matrix(DAI_matrix, scale = 1e6)
 Now we can also plot again, which might help to understand what we've just done or to explain it to others. This bit will just look at the most frequent words per author.
 
 ```{r plotting_frequencies}
-# Get word frequencies for DIC and JEF
+# Get word frequencies for SAT and DAI
 SAT_word_frequencies <- SAT_matrix_norm %>%
   select(-filename) %>%
   summarise(across(everything(), mean)) %>%  
@@ -331,7 +331,7 @@ SAT_single_word <- SAT_matrix_norm %>%
 DAI_single_word <- DAI_matrix_norm %>% 
   select(filename, matches("^it$"))
 
-# Add a column for the author (to distinguish between DIC and JEF)
+# Add a column for the author (to distinguish between SAT and DAI)
 SAT_single_word$author <- "SAT"
 DAI_single_word$author <- "DAI"
 
@@ -357,6 +357,7 @@ ggplot(single_word_data_long,
        y = "Frequency of 'it'",
        fill = "Author") +
   scale_fill_manual(values = custom_colours) +  
+  scale_y_continuous(labels = label_number()) +
   theme_minimal()
 ```
 
@@ -544,6 +545,8 @@ ggplot(umap_df, aes(x = UMAP1, y = UMAP2, color = folder)) +
 
 For the last bit in this markdown, we will have a look at what the library `stylo` can do for us in terms of computational authorship analysis.
 
+If you are on a Mac, you likely need to install X11 as well for it to work. See here for details: https://github.com/computationalstylistics/stylo.
+
 ## Libraries IV
 
 ```{r libraries_stylo, message = FALSE, warning = FALSE}
@@ -554,41 +557,41 @@ library(stylo)       # stylometric analysis
 
 For this, we usually require larger amounts of data. This is why there is the option here to read in more data. We will load or read in the corpus by author and genre.
 
-First we define a function called loadc(), which we use to collect all the texts from some set of folder paths in our corpus. It takes two arguments the set of paths and the size of the text sample, and it returns a data frame of meta data and stylo corpus. 
+First we define a function called loadc(), which we use to collect all the texts from some set of folder paths in our corpus. It takes two arguments: the set of paths and the size of the text sample, and it returns a data frame of meta data and stylo corpus. 
 
 ```{r loading_data_function}
-loadc <- function(paths, text_l = 500)
+loadc <- function(paths, text_l = 500)  # Define function with paths to corpora and a minimum text length
 {
-  corpus <- list()
-  df_rows <- list()
+  corpus <- list()       # Initialise empty list to hold parsed texts
+  df_rows <- list()      # Initialise empty list to hold metadata rows
   
-  for (i in 1:length(paths))
+  for (i in 1:length(paths))  # Loop over each path
   {
-    texts <- load.corpus.and.parse(file = "all", 
+    texts <- load.corpus.and.parse(file = "all",  # Initially parse all texts in the directory
                                    paths[i])
     
-    texts <- list.files(paths[i])[lengths(texts) >= text_l]
+    texts <- list.files(paths[i])[lengths(texts) >= text_l]  # Filter out files shorter than text_l
     
-    texts <- load.corpus.and.parse(file = texts, 
+    texts <- load.corpus.and.parse(file = texts,            # Re-parse only texts that meet length requirement
                                    corpus.dir = paths[i], 
                                    sample.size=text_l, 
                                    sampling="normal.sampling")
     
-    aut  <- sub("\\./Data/(\\w+)/\\w+", "\\1", paths[i])
-    reg  <- sub("\\./Data/\\w+/(\\w+)", "\\1", paths[i])
-    cou  <- length(texts)
+    aut  <- sub("\\./Data/(\\w+)/\\w+", "\\1", paths[i])  # Extract author name from file path
+    reg  <- sub("\\./Data/\\w+/(\\w+)", "\\1", paths[i])  # Extract register (genre/domain) from path
+    cou  <- length(texts)                                 # Count number of valid texts
     
-    df_rows[[i]] <- data.frame(author = aut, register = reg, count=cou)
+    df_rows[[i]] <- data.frame(author = aut, register = reg, count=cou)  # Store metadata
     
-    corpus[[i]] <-  texts
+    corpus[[i]] <-  texts  # Store parsed texts
   }
   
-  meta <- do.call(rbind, df_rows)  
+  meta <- do.call(rbind, df_rows)  # Combine metadata rows into a single data frame
   
-  alltexts <- unlist(corpus, recursive = FALSE)
-  mfw <- make.frequency.list(alltexts, value = FALSE, relative = FALSE)
+  alltexts <- unlist(corpus, recursive = FALSE)  # Flatten corpus into a single list of texts
+  mfw <- make.frequency.list(alltexts, value = FALSE, relative = FALSE)  # Create frequency list
   
-  return(list(meta = meta, corpus = corpus, mfw = mfw))
+  return(list(meta = meta, corpus = corpus, mfw = mfw))  # Return list containing metadata, corpus, and frequency list
 }
 ```
 
@@ -609,7 +612,7 @@ With the next chunk we can have a look at the corpus we created with that.
 
 ```{r corpus_dimensions}
 data$meta
-summary(data$corpus)
+#summary(data$corpus)
 head(data$mfw,50)
 ```
 
@@ -617,24 +620,25 @@ head(data$mfw,50)
 
 The first one does the analysis, but allows you to specify which corpora (as indexed by data$meta) and the say how many top most frequent words. 
 
+PCA stands for Principal Component Analysis. It is a statistical method used to simplify complex data by reducing the number of variables while retaining most of the important information. Essentially, it transforms the original data into a new set of variables, called principal components, which are uncorrelated and ordered by the amount of variance they explain. 
+
 ```{r stylo_pca}
-stylo.pca <- function(corpora, types)
+stylo.pca <- function(corpora, types)  # Define function to perform PCA on selected corpora and number of types (words)
 {
-  texts <- unlist(data$corpus[corpora], recursive= FALSE)
+  texts <- unlist(data$corpus[corpora], recursive = FALSE)  # Extract and flatten selected texts from global 'data$corpus'
   
-  freq <- make.table.of.frequencies(texts, 
-                                    data$mfw[1:types], 
-                                    absent.sensitive = TRUE, 
-                                    relative = TRUE)
+  freq <- make.table.of.frequencies(texts,               # Create frequency table from selected texts
+                                    data$mfw[1:types],   # Use top 'types' most frequent words from global 'data$mfw'
+                                    absent.sensitive = TRUE,  # Include zeroes for absent words
+                                    relative = TRUE)          # Use relative frequencies
   
-  pca<-prcomp(freq, scale = TRUE)
+  pca <- prcomp(freq, scale = TRUE)  # Perform PCA on frequency table, scaling the variables
   
-  scores <- as.data.frame(pca$x)
-  scores$labels <- names(texts)
-  scores$authors <- sub("_.+", "", names(texts))
+  scores <- as.data.frame(pca$x)          # Extract PCA scores (coordinates of texts in PC space)
+  scores$labels <- names(texts)           # Add text labels (file names or IDs)
+  scores$authors <- sub("_.+", "", names(texts))  # Extract author names from labels (assuming format "author_filename")
   
-  return(list(freq = freq, pca = pca, scores = scores)) 
-  
+  return(list(freq = freq, pca = pca, scores = scores))  # Return list of frequency table, PCA object, and scores data frame
 }
 ```
 
@@ -643,25 +647,28 @@ And the second one plots it.
 ```{r plot_pca_labels}
 plot.pca <- function(scores, d1, d2, cex = 0.5, cols = NULL) {
   if (!is.null(cols)) {
-    col_vector <- cols[scores$authors]
+    col_vector <- cols[scores$authors]  # Use provided color mapping for each author
   } else {
-    default_cols <- c("orangered", "forestgreen", "purple2", "goldenrod", 
+    default_cols <- c("orangered", "forestgreen", "purple2", "goldenrod",   # Default color palette
                       "turquoise3", "darkorange4", "dodgerblue3", "orchid4", "limegreen")
-    author_levels <- unique(scores$authors)
-    author_colors <- setNames(default_cols[seq_along(author_levels)], author_levels)
-    col_vector <- author_colors[scores$authors]
+    
+    author_levels <- unique(scores$authors)  # Get unique author names
+    author_colors <- setNames(default_cols[seq_along(author_levels)], author_levels)  # Assign colors to authors
+    col_vector <- author_colors[scores$authors]  # Map colors to authors in 'scores'
   }
 
-  x <- unlist(scores[d1])
-  y <- unlist(scores[d2])
-  labs <- rownames(scores)
+  x <- unlist(scores[d1])  # Extract PCA dimension for x-axis (e.g. PC1)
+  y <- unlist(scores[d2])  # Extract PCA dimension for y-axis (e.g. PC2)
+  labs <- rownames(scores)  # Get labels for each point (e.g. filenames or IDs)
 
-  plot(x, y, type = "n")
-  text(x, y, labels = labs, cex = cex, col = col_vector)
+  plot(x, y, type = "n")  # Initialize empty plot without points
+  text(x, y, labels = labs, cex = cex, col = col_vector)  # Add text labels with specified size and color
 }
+
 ```
 
 This also plots, but with dots instead of file names.
+Code is the same, minus the labels.
 
 ```{r plot_pca_dots}
 plot.pca.dot <- function(scores, d1, d2, cex = 0.75, cols = NULL) {
